@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="3D arcade squash game with realistic physics and support for all shot types from back wall boasts to the volley drop. Swing forearm rotation development and racket head cut angle, frantic racket kinematics, expressive Mii characters, webcam &amp; phone motion controls, and Lyria 3 audio. Even use pose estimation to 'play' against your opponents with the front cam or output to the big screen and use a back cam!" />
+  <meta property="og:title" content="Remix: Argon Squash" />
+  <meta property="og:description" content="3D arcade squash game with realistic physics and support for all shot types from back wall boasts to the volley drop. Swing forearm rotation development and racket head cut angle, frantic racket kinematics, expressive Mii characters, webcam &amp; phone motion controls, and Lyria 3 audio." />
+  <title>Remix: Argon Squash</title>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('play') || params.has('state')) {
+        document.documentElement.classList.add('autoplay-mode');
+      }
+      const stateParam = (params.get('state') || '').toLowerCase();
+      if (stateParam) {
+        document.documentElement.setAttribute('data-url-state', stateParam);
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="root" class="hidden" aria-hidden="true"></div>
+  <div id="canvas-container" aria-label="Argon Squash 3D Glass Show-Court Viewport">
+    <canvas id="game-canvas"></canvas>
+  </div>
+
+  <div id="hud-root">
+    <header id="top-hud-bar">
+      <div class="top-hud-left-group">
+        <div id="games-pill-player" class="wii-games-pill" title="Player Games Won">
+          <span class="game-bubble" data-slot="0"></span>
+          <span class="game-bubble" data-slot="1"></span>
+          <span class="game-bubble extra-slot hidden" data-slot="2"></span>
+        </div>
+        <button id="btn-auto-t-toggle" class="hud-tactical-pill active" type="button" title="Toggle Automatic T-Zone Recovery after each shot (Key: G)">
+          <span class="tactical-dot" id="auto-t-dot"></span>
+          <span id="auto-t-label">AUTO-T-RETURN: ON</span>
+        </button>
+      </div>
+
+      <div id="scoreboard-pill" class="wii-scoreboard-pill">
+        <div class="mii-side mii-side-player">
+          <div class="mii-avatar-badge player-tint">
+            <canvas id="mii-icon-player" width="192" height="192"></canvas>
+          </div>
+          <div class="mii-avatar-badge player-tint secondary-mii hidden">
+            <canvas id="mii-icon-player-2" width="192" height="192"></canvas>
+          </div>
+        </div>
+        <div id="score-center-display" class="score-center-display">
+          <span id="score-player-text" class="score-digits">00</span>
+          <span id="score-separator" class="score-dash">-</span>
+          <span id="score-opponent-text" class="score-digits">00</span>
+        </div>
+        <div class="mii-side mii-side-opponent">
+          <div class="mii-avatar-badge opponent-tint secondary-mii hidden">
+            <canvas id="mii-icon-opponent-2" width="192" height="192"></canvas>
+          </div>
+          <div class="mii-avatar-badge opponent-tint">
+            <canvas id="mii-icon-opponent" width="192" height="192"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-hud-right-group">
+        <button id="btn-wonder-intro" class="hud-tactical-pill wonder-pill" type="button" title="Play the 2-Part 'Wonder First' Front-Corner Nick Demonstration">
+          <span>✨ Wonder Demo</span>
+        </button>
+        <button id="btn-controls-guide" class="hud-tactical-pill guide-pill" type="button" title="How to Play, Swing Controls &amp; Pose Cam Guide (Key: H)">
+          <span>❓ Controls (H)</span>
+        </button>
+        <button id="btn-tuning-lab-toggle" class="hud-tactical-pill lab-pill" type="button" title="Open Live Squash Tuning Lab &amp; Nick Cannon (Key: L)">
+          <span>⚗️ Tune Lab (L)</span>
+        </button>
+        <div id="games-pill-opponent" class="wii-games-pill" title="Opponent Games Won">
+          <span class="game-bubble" data-slot="0"></span>
+          <span class="game-bubble" data-slot="1"></span>
+          <span class="game-bubble extra-slot hidden" data-slot="2"></span>
+        </div>
+      </div>
+    </header>
+
+    <div id="opponent-presence-pill" class="opponent-presence-pill hidden" aria-live="polite">
+      <span id="opponent-presence-dot" class="presence-dot"></span>
+      <span id="opponent-presence-text">Waiting for Player 2…</span>
+    </div>
+
+    <div id="world-labels-layer">
+      <div id="server-tag" class="wii-server-tag hidden">
+        <span class="server-tag-text">Server (R)</span>
+      </div>
+      <div id="player-nameplate" class="wii-court-nameplate player-plate hidden">
+        <canvas id="plate-mii-player" width="192" height="192"></canvas>
+        <div class="plate-info">
+          <div class="plate-name">Ammaar</div>
+          <div class="plate-skill">T-Control</div>
+        </div>
+      </div>
+      <div id="timing-popup" class="wii-timing-popup hidden">
+        <span id="timing-popup-grade" class="timing-grade">PERFECT</span>
+        <span id="timing-popup-detail" class="timing-detail">TIGHT RAIL DRIVE • 178 KM/H</span>
+      </div>
+    </div>
+
+    <div id="center-banner-layer" class="center-banner-layer hidden">
+      <div id="center-banner-streak" class="center-banner-streak"></div>
+      <div id="center-banner-text" class="center-banner-text style-gold">Match Ball</div>
+      <div id="center-banner-sub" class="center-banner-sub hidden"></div>
+    </div>
+
+    <div id="replay-badge" class="wii-replay-badge hidden">
+      <span class="replay-dots">
+        <i class="dot dot-1"></i>
+        <i class="dot dot-2"></i>
+        <i class="dot dot-3"></i>
+      </span>
+      <span class="replay-label" id="replay-badge-text">Slow-Mo Nick Replay</span>
+    </div>
+
+    <div id="wonder-intro-overlay" class="wonder-intro-overlay hidden" role="region" aria-label="Wonder First Squash Demonstration">
+      <div class="wonder-intro-header">
+        <span class="wonder-intro-kicker" id="wonder-intro-title">DEMONSTRATION A — THE SPECTACULAR KILL</span>
+        <div class="wonder-intro-actions">
+          <button type="button" id="btn-intro-slowmo" class="hud-mini-btn hidden">🔍 Slow-Mo Corner Replay</button>
+          <button type="button" id="btn-intro-next" class="hud-mini-btn wonder-next-btn">Skip to Match ▸</button>
+        </div>
+      </div>
+      <p class="wonder-intro-commentary" id="wonder-intro-commentary">
+        Watch how the ball interacts with the front wall and side-wall/floor nick junction.
+      </p>
+    </div>
+
+    <div id="bottom-right-dock" class="hud-corner-dock bottom-right-dock">
+      <div class="squash-shot-selector-row" aria-label="Squash Shot Shaping & Disguise">
+        <button type="button" class="shot-chip active" data-shot-type="topspin" title="Drive / Rail (Key 1 or Hold Space)">1: Drive</button>
+        <button type="button" class="shot-chip" data-shot-type="drop" title="Open-Face Cut / Drop (Key 2 or Shift+Swing / Right-Click)">2: Cut Drop</button>
+        <button type="button" class="shot-chip" data-shot-type="boast" title="2-Wall Boast (Key 3 or B)">3: Boast</button>
+        <button type="button" class="shot-chip" data-shot-type="lob" title="High Lob (Key 4)">4: Lob</button>
+        <button type="button" class="shot-chip" data-shot-type="smash" title="Volley Kill (Key 5)">5: Kill</button>
+      </div>
+
+      <div id="timing-gauge-card" class="timing-gauge-card">
+        <div class="gauge-header">
+          <span id="gauge-mode-title">PREP &amp; RACKET FACE</span>
+          <span id="gauge-speed-readout">SQUARE • READY</span>
+        </div>
+        <div class="timing-bar-track">
+          <div class="timing-zone zone-early">EARLY (Cross)</div>
+          <div class="timing-zone zone-sweet">TIGHT RAIL / NICK</div>
+          <div class="timing-zone zone-late">LATE (Boast)</div>
+          <div id="timing-cursor" class="timing-cursor" style="left: 50%;"></div>
+        </div>
+      </div>
+
+      <div class="motion-controls-row">
+        <div id="webcam-pip-card" class="webcam-pip-card hidden">
+          <video id="webcam-video" autoplay playsinline muted></video>
+          <canvas id="webcam-canvas" width="160" height="120"></canvas>
+          <div class="pip-badge">
+            <span class="pip-live-dot"></span>
+            <span id="pip-motion-label">Pose + Swing</span>
+          </div>
+        </div>
+        <div class="motion-buttons-col">
+          <div class="webcam-btn-group">
+            <button id="btn-webcam-toggle" class="hud-mini-btn motion-btn" type="button">
+              <span class="btn-dot" id="webcam-status-dot"></span>
+              <span id="webcam-btn-label">Webcam Pose</span>
+            </button>
+            <button id="btn-camera-facing" class="hud-mini-btn hidden" type="button" title="Switch Front / Back Camera for Big-Screen Output">
+              <span id="camera-facing-label">Front Cam</span>
+            </button>
+            <button id="btn-handedness-toggle" class="hud-mini-btn" type="button" title="Toggle Right-Handed / Left-Handed Player Stance">
+              <span id="handedness-btn-label">🤚 Right-Handed</span>
+            </button>
+          </div>
+          <button id="btn-phone-racket" class="hud-mini-btn motion-btn hidden" type="button">
+            <span class="btn-dot" id="phone-status-dot"></span>
+            <span id="phone-status-label">Pocket Racket</span>
+          </button>
+          <div id="bottom-left-dock" class="hud-corner-dock bottom-left-dock">
+            <div class="dock-pill-row">
+              <button id="btn-audio-toggle" class="hud-mini-btn" type="button" title="Mute / Unmute Music &amp; Squash SFX (Key: M)">
+                <span class="btn-dot music-on" id="audio-status-dot"></span>
+                <span id="audio-track-label">♪ Physical Chess Rally</span>
+              </button>
+              <button id="btn-jukebox-next" class="hud-mini-btn" type="button" title="Next Music Track in Jukebox (Key: N)">
+                <span>⏭</span>
+              </button>
+              <button id="btn-jukebox-open" class="hud-mini-btn jukebox-pill-btn" type="button" title="Open 7-Track Music Jukebox &amp; Referee Voice Mixer (Key: J)">
+                <span>🎵 Jukebox</span>
+              </button>
+              <button id="btn-ref-voice-toggle" class="hud-mini-btn active" type="button" title="Toggle Deep Male Squash Referee Voice ('Down! Handout, five-four') (Key: V)">
+                <span class="btn-dot active" id="ref-voice-dot"></span>
+                <span id="ref-voice-label">🎙️ Ref: ON</span>
+              </button>
+              <button id="btn-court-theme" class="hud-mini-btn" type="button" title="Switch 3D Squash Court Environment">
+                <span>Court:</span>
+                <strong id="court-theme-label">Glass Show</strong>
+              </button>
+              <button id="btn-camera-cycle" class="hud-mini-btn" type="button" title="Cycle Camera Angle (C)">
+                <span>Cam:</span>
+                <strong id="camera-mode-label">Back Glass</strong>
+              </button>
+              <button id="btn-replay-trigger" class="hud-mini-btn" type="button" title="Toggle Slow-Mo Nick Replay (R)">
+                <span>Replay</span>
+              </button>
+              <button id="btn-multiplayer-modal" class="hud-mini-btn hidden" type="button" title="Open 1v1 Multiplayer &amp; Companion Links">
+                <span>💬 1v1</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TITLE MODAL -->
+  <div id="title-modal" class="wii-modal-backdrop">
+    <div class="wii-title-card">
+      <div class="wii-logo-header">
+        <h1 class="argon-logo-title">
+          <span class="logo-word-argon">Virtual</span>
+          <span class="logo-word-tennis">Squash</span>
+        </h1>
+        <p class="squash-subtitle-tag">Argon Squash • Physical Chess, Disguise &amp; The Four Walls</p>
+        <div class="welcome-announcer-row">
+          <button type="button" id="btn-welcome-callout" class="welcome-callout-pill" title="Hear the Deep Male Announcer Intro">
+            <span>🔊 "Welcome to Virtual Squash!"</span>
+          </button>
+          <button type="button" id="btn-setup-jukebox" class="welcome-callout-pill jukebox-tag-pill" title="Open 7-Track Music Jukebox &amp; Audio Mixer (Key: J)">
+            <span>🎵 Music Jukebox (7 Tracks)</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="court-preview-diagram squash-preview-diagram">
+        <div class="mini-squash-court">
+          <div class="mini-front-wall-bar" title="Front Wall &amp; 0.48m Tin">FRONT WALL + TIN</div>
+          <div class="mini-short-line"></div>
+          <div class="mini-half-court-line"></div>
+          <div class="mini-t-zone-glow" title="The T Position">THE "T"</div>
+          <div class="mini-service-box left"></div>
+          <div class="mini-service-box right"></div>
+          <div class="court-slot-marker opponent-marker">
+            <canvas id="setup-mii-opponent" width="192" height="192"></canvas>
+            <div id="setup-opponent-label" class="slot-tag cpu-tag">Tactical AI</div>
+          </div>
+          <div class="court-slot-marker player-marker">
+            <canvas id="setup-mii-player" width="192" height="192"></canvas>
+            <div class="slot-tag you-tag">You</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <div class="setup-label-row">Opponent &amp; Mode</div>
+        <div class="wii-green-btn-row" id="difficulty-mode-group">
+          <button type="button" class="wii-green-choice selected" data-difficulty="casual">
+            <span class="choice-main">Club AI</span>
+          </button>
+          <button type="button" class="wii-green-choice" data-difficulty="pro">
+            <span class="choice-main">Pro Chess AI</span>
+          </button>
+          <button type="button" class="wii-green-choice" data-difficulty="1v1">
+            <span class="choice-main">1v1 Match</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <div class="setup-label-row">Court Environment &amp; Scoring</div>
+        <div class="wii-green-btn-row" id="court-theme-group">
+          <button type="button" class="wii-green-choice selected" data-theme="glass_showcourt">
+            <span class="choice-main">Glass Arena</span>
+          </button>
+          <button type="button" class="wii-green-choice" data-theme="classic_hardwood">
+            <span class="choice-main">Hardwood Club</span>
+          </button>
+          <button type="button" class="wii-green-choice" data-theme="neon_cyber">
+            <span class="choice-main">Neon Cube</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="setup-section" id="match-length-section">
+        <div class="wii-green-btn-row" id="match-length-group">
+          <button type="button" class="wii-green-choice" data-games="1" data-scoring="ARCADE_5">
+            <span class="choice-main">Arcade 5-Pt</span>
+          </button>
+          <button type="button" class="wii-green-choice selected" data-games="3" data-scoring="PAR_11">
+            <span class="choice-main">PAR 11 (Bo3)</span>
+          </button>
+          <button type="button" class="wii-green-choice" data-games="5" data-scoring="HIHO_9">
+            <span class="choice-main">Hi-Ho 9 (Bo5)</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <div class="setup-label-row">Footwork, Deep Referee Voice &amp; Pose Cam</div>
+        <div class="wii-green-btn-row" style="grid-template-columns: repeat(2, 1fr);">
+          <button type="button" id="btn-setup-auto-t" class="wii-green-choice selected" title="ON = Player moves to ball &amp; recovers to T automatically so you can focus on shot selection!">
+            <span class="choice-main" id="setup-auto-t-text">Auto-Move &amp; T: ON</span>
+          </button>
+          <button type="button" id="btn-setup-ref-voice" class="wii-green-choice selected" title="Toggle Deep Male Referee Voice calling out 'Down! Handout, five-four', 'Not Up!', etc.">
+            <span class="choice-main" id="setup-ref-voice-text">🎙️ Referee Voice: ON (Deep)</span>
+          </button>
+          <button type="button" id="btn-setup-pose-cam" class="wii-green-choice" title="Use Front Cam or Back Cam (Big Screen TV) for full-body lunges + forearm swing tracking">
+            <span class="choice-main">📷 Enable Pose Cam (Front/Back)</span>
+          </button>
+          <button type="button" id="btn-setup-open-guide" class="wii-green-choice" title="View full Swing, Off-Back-Wall Drive &amp; Pose Cam instructions">
+            <span class="choice-main">❓ Full Controls Guide</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="setup-quick-controls-strip">
+        <div><strong>Swing &amp; Disguise:</strong> Hold &amp; release <kbd>Spacebar</kbd> or <kbd>Left-Click</kbd> for Drive • Hold <kbd>Shift</kbd> / <kbd>Right-Click</kbd> on release for Open-Face Drop</div>
+        <div><strong>Instant Shots:</strong> <kbd>1</kbd> Drive · <kbd>2</kbd> Cut Drop · <kbd>3</kbd>/<kbd>B</kbd> Boast (<kbd>Shift+B</kbd> Back-Wall) · <kbd>4</kbd> Lob · <kbd>5</kbd> Kill · <kbd>Q/E</kbd> Aim</div>
+        <div><strong>Referee &amp; Jukebox:</strong> Deep male referee calls <em>"Down! Handout, five-four"</em> (<kbd>V</kbd> to toggle) • Press <kbd>J</kbd> for 7-Track Music Jukebox!</div>
+      </div>
+
+      <div class="wii-modal-actions squash-modal-actions">
+        <button id="btn-start-intro" type="button" class="wii-ok-btn wonder-start-btn">
+          <span class="hand-cursor-icon">✨</span>
+          <span>Wonder Intro (2-Part Demo)</span>
+        </button>
+        <button id="btn-start-match" type="button" class="wii-ok-btn">
+          <span class="hand-cursor-icon">🎾</span>
+          <span>Play Match Now</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLS & HOW TO PLAY GUIDE MODAL -->
+  <div id="controls-guide-modal" class="wii-modal-backdrop hidden" role="dialog" aria-labelledby="controls-guide-title">
+    <div class="wii-title-card controls-guide-card">
+      <div class="controls-guide-header">
+        <div>
+          <div class="tuning-lab-kicker">PHYSICAL CHESS • HOW TO PLAY</div>
+          <h2 id="controls-guide-title" class="controls-guide-heading">Controls, Off-Back-Wall Drives &amp; Pose Cam</h2>
+        </div>
+        <button type="button" id="btn-close-controls-guide" class="tuning-lab-close-btn" title="Close (H or Esc)">✕</button>
+      </div>
+
+      <div class="controls-guide-grid">
+        <div class="guide-box">
+          <h3>1. Do I Have to Move My Player?</h3>
+          <p><strong>Your choice! Toggle <code>AUTO-T-RETURN</code> in the top-left bar (or press <kbd>T</kbd>):</strong></p>
+          <ul>
+            <li><strong>AUTO-T-RETURN: ON (Default — Focus on Shots &amp; Timing):</strong> Your Mii automatically moves to intercept the ball (including stepping into the back pocket to let deep drives come <em>off the back glass wall</em>) and automatically recovers to the <strong>T-Position</strong> after each shot. You can focus 100% on shot selection and disguise!</li>
+            <li><strong>AUTO-T-RETURN: OFF (Manual Footwork):</strong> You control every step using <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>Arrow Keys</kbd> (or Webcam Body Lunges). If you stay stranded in a corner without recovering to the T, the AI will attack the open court!</li>
+          </ul>
+        </div>
+
+        <div class="guide-box">
+          <h3>2. How Do I Swing &amp; Shape Shots?</h3>
+          <ul>
+            <li><strong>Hold &amp; Release (<kbd>Spacebar</kbd> or <kbd>Left-Click</kbd>):</strong>
+              <ul>
+                <li><strong>Hold down</strong> as the ball approaches to coil your backswing preparation (shows a hard-drive posture that pushes the opponent deep).</li>
+                <li><strong>Release normally</strong> → <strong>Tight Straight / Cross-Court Drive</strong>.</li>
+                <li><strong>Hold <kbd>Shift</kbd> (or <kbd>Right-Click</kbd>) on release</strong> → Opens the racket face (<code>+34° cut</code>) for a <strong>Disguised Soft Drop</strong> into the front nick!</li>
+              </ul>
+            </li>
+            <li><strong>Direct Shot Hotkeys (Instant Swing):</strong>
+              <kbd>1</kbd> Drive · <kbd>2</kbd> Cut Drop · <kbd>3</kbd> or <kbd>B</kbd> 2-Wall Boast (<kbd>Shift+B</kbd> Back-Wall Boast) · <kbd>4</kbd> High Lob · <kbd>5</kbd> Volley Kill · <kbd>Q</kbd>/<kbd>E</kbd> Aim Left/Right Wall.</li>
+            <li><strong>Mouse / Trackpad Swipe:</strong> Drag &amp; release on court (Swipe Up = Drive, Short/Shift = Drop, Wide Sideways = Boast, Fast Downward Snap = Volley Kill).</li>
+          </ul>
+        </div>
+
+        <div class="guide-box highlight-box">
+          <h3>3. Returning the Deep "Off-the-Back-Wall" Drive</h3>
+          <p>In squash, an ideally placed deep drive bounces once in the back court, hits the <strong>Back Glass Wall</strong>, and rebounds <strong>forward and upward</strong>.</p>
+          <ul>
+            <li><strong>Wait for the Glass Pop:</strong> Do not lunge at a deep drive while it is racing backward past you! Let it hit the back glass wall first.</li>
+            <li><strong>Strike on the Upward Rise:</strong> As the ball rebounds forward off the glass and kicks upward (watch for the <em>"OFF BACK WALL! • STRIKE RISING"</em> cue), press/release <kbd>Spacebar</kbd>, <kbd>Click</kbd>, or <kbd>1</kbd> to unleash a <strong>Rising Off-the-Back-Wall Drive ★</strong>!</li>
+          </ul>
+        </div>
+
+        <div class="guide-box">
+          <h3>4. Webcam Pose Estimation (Front Cam &amp; Back Cam / TV)</h3>
+          <p>Click <strong>📷 Pose Cam</strong> in the bottom-right dock (or Setup menu) to play with live computer vision:</p>
+          <ul>
+            <li><strong>Arm &amp; Forearm Swing Tracking:</strong> Whip your hand/forearm across the camera to strike! Fast forward/horizontal swing = <strong>Drive</strong>; gentle downward open chop = <strong>Cut Drop</strong>; wide sweep = <strong>Boast</strong>; high snap = <strong>Volley Kill</strong>.</li>
+            <li><strong>Full-Body T-Position Lunges:</strong> Lean or step Left, Right, Forward, or Back in the camera frame to lunge from the T.</li>
+            <li><strong>🔄 Front Cam vs Back Cam (Big Screen):</strong> Click <strong>Front Cam / Back Cam</strong> next to the Pose button to switch between facing your laptop/phone (<code>Front Cam</code>) or outputting to a TV and tracking your body from behind (<code>Back Cam</code>).</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="wii-modal-actions" style="margin-top: 12px;">
+        <button id="btn-guide-toggle-cam" type="button" class="wii-ok-btn wonder-start-btn">
+          <span>📷 Toggle Pose Cam Now</span>
+        </button>
+        <button id="btn-guide-resume" type="button" class="wii-ok-btn">
+          <span>Got It — Back to Court</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MUSIC JUKEBOX & DEEP MALE REFEREE VOICE MODAL -->
+  <div id="jukebox-modal" class="wii-modal-backdrop hidden" role="dialog" aria-labelledby="jukebox-modal-title">
+    <div class="wii-title-card controls-guide-card jukebox-modal-card">
+      <div class="controls-guide-header">
+        <div>
+          <div class="tuning-lab-kicker">LYRIA 3 &amp; SYNTHWAVE SEQUENCER • WSF REFEREE PA</div>
+          <h2 id="jukebox-modal-title" class="controls-guide-heading">🎵 Music Jukebox &amp; Deep Referee Voice</h2>
+        </div>
+        <button type="button" id="btn-close-jukebox" class="tuning-lab-close-btn" title="Close Jukebox (J or Esc)">✕</button>
+      </div>
+
+      <div class="jukebox-now-playing-bar">
+        <div class="jukebox-eq-bars" id="jukebox-eq-bars">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="jukebox-now-meta">
+          <div class="jukebox-now-kicker" id="jukebox-now-genre">NOW PLAYING • LYRIA 3 SOUNDTRACK</div>
+          <div class="jukebox-now-title" id="jukebox-now-title">Physical Chess Rally (Lyria 3)</div>
+          <div class="jukebox-now-sub" id="jukebox-now-sub">Active Squash Atmosphere • 124 BPM</div>
+        </div>
+        <div class="jukebox-transport-btns">
+          <button type="button" id="btn-jukebox-prev-modal" class="jukebox-ctrl-btn" title="Previous Track">⏮</button>
+          <button type="button" id="btn-jukebox-mute-modal" class="jukebox-ctrl-btn" title="Mute / Unmute">🔊</button>
+          <button type="button" id="btn-jukebox-next-modal" class="jukebox-ctrl-btn" title="Next Track">⏭</button>
+        </div>
+      </div>
+
+      <div class="jukebox-mode-row">
+        <span class="jukebox-mode-label">Playback Mode:</span>
+        <div class="jukebox-mode-pills">
+          <button type="button" class="jukebox-mode-chip active" data-jmode="auto">Auto (Match State)</button>
+          <button type="button" class="jukebox-mode-chip" data-jmode="locked">Lock Selected Track</button>
+          <button type="button" class="jukebox-mode-chip" data-jmode="shuffle">🔀 Shuffle All 7 Tracks</button>
+        </div>
+      </div>
+
+      <div class="jukebox-layout-grid">
+        <div class="jukebox-tracklist-box">
+          <div class="jukebox-section-title">Select Track to Play Immediately</div>
+          <div id="jukebox-tracks-container" class="jukebox-tracks-list"></div>
+        </div>
+
+        <div class="jukebox-referee-box">
+          <div class="jukebox-section-title">🎙️ Deep Male Squash Referee Voice</div>
+          <p class="jukebox-ref-desc">
+            Calls out official WSF/PSA squash decisions in a deep baritone voice:
+            <em>"Down! Handout, five-four"</em>, <em>"Not up!"</em>, <em>"Out!"</em>, and <em>"Welcome to Virtual Squash!"</em>
+          </p>
+
+          <button type="button" id="btn-jukebox-ref-toggle" class="jukebox-ref-toggle-btn active">
+            <span class="btn-dot active" id="jukebox-ref-dot"></span>
+            <span id="jukebox-ref-label">Referee Voice: ON (Deep Male Baritone)</span>
+          </button>
+
+          <div class="jukebox-slider-group">
+            <div class="jukebox-slider-row">
+              <span>Referee Voice Pitch (Baritone Depth)</span>
+              <strong id="jukebox-pitch-val">0.72x</strong>
+            </div>
+            <input type="range" id="jukebox-pitch-slider" class="tuning-range-input" min="0.55" max="1.05" step="0.02" value="0.72" />
+          </div>
+
+          <div class="jukebox-test-calls-title">Test Live Referee Callouts:</div>
+          <div class="jukebox-test-calls-grid">
+            <button type="button" class="jukebox-call-btn" data-callout="WELCOME">🔊 "Welcome to Virtual Squash!"</button>
+            <button type="button" class="jukebox-call-btn" data-callout="Down! Handout, five-four.">🔊 "Down! Handout, five-four"</button>
+            <button type="button" class="jukebox-call-btn" data-callout="Not up! Handout, eight-seven.">🔊 "Not up! Handout, eight-seven"</button>
+            <button type="button" class="jukebox-call-btn" data-callout="Nick! Ten-eight, match ball!">🔊 "Nick! Ten-eight, match ball!"</button>
+          </div>
+
+          <div class="jukebox-section-title" style="margin-top: 6px;">🎚️ Master Audio Mixer</div>
+          <div class="jukebox-slider-group">
+            <div class="jukebox-slider-row">
+              <span>Music Volume</span>
+              <strong id="jukebox-music-vol-val">65%</strong>
+            </div>
+            <input type="range" id="jukebox-music-vol" class="tuning-range-input" min="0" max="1" step="0.02" value="0.65" />
+          </div>
+          <div class="jukebox-slider-group">
+            <div class="jukebox-slider-row">
+              <span>Court SFX &amp; Referee Volume</span>
+              <strong id="jukebox-sfx-vol-val">88%</strong>
+            </div>
+            <input type="range" id="jukebox-sfx-vol" class="tuning-range-input" min="0" max="1" step="0.02" value="0.88" />
+          </div>
+        </div>
+      </div>
+
+      <div class="wii-modal-actions" style="margin-top: 8px;">
+        <button id="btn-jukebox-resume" type="button" class="wii-ok-btn">
+          <span>Back to Court</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPANION MODAL -->
+  <div id="companion-modal" class="wii-modal-backdrop hidden">
+    <div class="wii-dialog-box wii-companion-clean-dialog">
+      <div class="mp-dialog-header">
+        <h2 class="dialog-title">📱 Phone Controller</h2>
+        <span id="mp-active-status" class="mp-conn-tag">Scan QR</span>
+      </div>
+      <p class="dialog-desc">Scan with your phone camera</p>
+      <div id="mp-card-p1" class="mp-clean-qr-wrap">
+        <span id="mp-p1-status" class="hidden"></span>
+        <img id="companion-qr" src="https://www.gstatic.com/aistudio/starter-apps/tennis/qr/player1_qr.png" alt="Phone Controller QR" width="200" height="200" class="mp-qr-img" />
+        <a id="companion-link" href="/companion.html?room=default&role=p1" target="_blank" rel="noopener" class="mp-subtle-link">Open controller link ↗</a>
+      </div>
+      <div id="mp-card-p2" class="mp-clean-qr-wrap hidden">
+        <span id="mp-p2-status" class="hidden"></span>
+        <img id="companion-qr-p2" src="https://www.gstatic.com/aistudio/starter-apps/tennis/qr/player2_qr.png" alt="Phone Controller QR" width="200" height="200" class="mp-qr-img" />
+        <a id="companion-link-p2" href="/companion.html?room=default&role=p2" target="_blank" rel="noopener" class="mp-subtle-link">Open controller link ↗</a>
+      </div>
+      <div class="dialog-actions">
+        <button id="btn-close-companion" type="button" class="wii-pill-btn">Back to Court</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VICTORY MODAL -->
+  <div id="victory-modal" class="wii-modal-backdrop hidden">
+    <div class="wii-skill-card">
+      <div class="skill-card-header">Squash Tactical Rating</div>
+      <div class="skill-card-body">
+        <div class="skill-chart-frame">
+          <canvas id="skill-graph-canvas" width="280" height="200"></canvas>
+        </div>
+        <div class="skill-mii-summary">
+          <div id="victory-result-banner" class="victory-result-banner">YOU WIN!</div>
+          <div class="skill-score-pill">
+            <canvas id="victory-mii-icon" width="192" height="192"></canvas>
+            <div class="skill-score-meta">
+              <div class="skill-rating-number" id="skill-rating-value">1120</div>
+              <div class="skill-player-name">Ammaar (+120)</div>
+            </div>
+          </div>
+          <div id="victory-match-score" class="victory-match-score">Final Games: 2 - 0</div>
+        </div>
+      </div>
+      <div class="skill-card-footer">
+        <button id="btn-play-again" type="button" class="wii-footer-btn primary">Play again</button>
+        <button id="btn-return-title" type="button" class="wii-footer-btn secondary">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { renderAllHudMiiAvatars } from './src/mii_avatars.js';
+    renderAllHudMiiAvatars();
+  </script>
+  <script type="module" src="./src/game_engine.js"></script>
+</body>
+</html>

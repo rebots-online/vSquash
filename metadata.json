@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Argon Squash",
+  "description": "3D arcade squash game with realistic physics and support for all shot types from back wall boasts to the volley drop. Swing forearm rotation development and racket head cut angle, frantic racket kinematics, expressive Mii characters, webcam \u0026 phone motion controls, and Lyria 3 audio. Even use pose estimation to \u0027play\u0027 against your opponents with the front cam or output to the big screen and use a back cam!",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
