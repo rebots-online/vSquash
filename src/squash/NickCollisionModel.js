@@ -156,16 +156,16 @@ export class NickCollisionModel {
 
       case 'two_wall_boast':
         // Attacking 2-wall boast struck into the right side wall first, deflecting
-        // across the front wall toward the left front nick.
+        // across the front wall straight into the opposite left side-wall/floor nick.
         return {
           id: 'two_wall_boast',
-          title: 'Attacking Two-Wall Nick Boast',
-          subtitle: 'Angled off the right side wall onto the front wall and dying in the opposite corner',
+          title: 'Attacking Side-Front-Nick Boast',
+          subtitle: 'Angled off the right side wall onto the front wall and rolling dead in the opposite left nick',
           hitter: 'player',
           shotType: 'BOAST',
           cutAngleDeg: 24,
           pos: new THREE.Vector3(1.65, 0.88, 1.85),
-          vel: new THREE.Vector3(7.4, 2.85, -18.2),
+          vel: new THREE.Vector3(24.15, 0.94, -23.77),
           spin: new THREE.Vector3(-12, 14, 0)
         };
 
@@ -186,17 +186,17 @@ export class NickCollisionModel {
 
       case 'back_wall_boast':
         // Defensive recovery boast struck forcefully into the back glass wall (+Z)
-        // when trapped deep in the back-left corner, rebounding all the way to the front wall.
+        // when trapped deep in the back-left corner, rebounding off back + side wall to reach the front wall.
         return {
           id: 'back_wall_boast',
           title: 'Back-Wall Recovery Boast',
-          subtitle: 'Struck into the rear glass wall (+Z) from deep in the back corner to reach the front wall',
+          subtitle: 'Struck into the rear glass wall (+Z) & side wall when trapped at the back to reach the front wall',
           hitter: 'player',
           shotType: 'BACK_WALL_BOAST',
           cutAngleDeg: 28,
           pos: new THREE.Vector3(-2.35, 0.85, 3.55),
-          vel: new THREE.Vector3(-2.6, 5.4, 15.8),
-          spin: new THREE.Vector3(-14, 6, 0)
+          vel: new THREE.Vector3(-6.8, 5.15, 33.5),
+          spin: new THREE.Vector3(-14, -8, 0)
         };
 
       default:

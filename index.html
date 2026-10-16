@@ -39,6 +39,10 @@
           <span class="tactical-dot" id="auto-t-dot"></span>
           <span id="auto-t-label">AUTO-T-RETURN: ON</span>
         </button>
+        <button id="btn-spectator-toggle" class="hud-tactical-pill spectator-pill" type="button" title="Watch Continuous AI vs AI Match with Real Physics — or Click/Press P to Take Control (Key: P)">
+          <span class="tactical-dot" id="spectator-dot"></span>
+          <span id="spectator-label">🤖 WATCH AI vs AI (P)</span>
+        </button>
       </div>
 
       <div id="scoreboard-pill" class="wii-scoreboard-pill">
@@ -251,19 +255,22 @@
           </div>
           <div class="court-slot-marker player-marker">
             <canvas id="setup-mii-player" width="192" height="192"></canvas>
-            <div class="slot-tag you-tag">You</div>
+            <div id="setup-player-label" class="slot-tag you-tag">You</div>
           </div>
         </div>
       </div>
 
       <div class="setup-section">
         <div class="setup-label-row">Opponent &amp; Mode</div>
-        <div class="wii-green-btn-row" id="difficulty-mode-group">
+        <div class="wii-green-btn-row" id="difficulty-mode-group" style="grid-template-columns: repeat(4, 1fr);">
           <button type="button" class="wii-green-choice selected" data-difficulty="casual">
             <span class="choice-main">Club AI</span>
           </button>
           <button type="button" class="wii-green-choice" data-difficulty="pro">
             <span class="choice-main">Pro Chess AI</span>
+          </button>
+          <button type="button" class="wii-green-choice" data-difficulty="ai_vs_ai" title="Continuous Spectator Mode: Both players controlled by Pro Tactical AI with full physics">
+            <span class="choice-main">🤖 AI vs AI</span>
           </button>
           <button type="button" class="wii-green-choice" data-difficulty="1v1">
             <span class="choice-main">1v1 Match</span>
@@ -327,11 +334,15 @@
       <div class="wii-modal-actions squash-modal-actions">
         <button id="btn-start-intro" type="button" class="wii-ok-btn wonder-start-btn">
           <span class="hand-cursor-icon">✨</span>
-          <span>Wonder Intro (2-Part Demo)</span>
+          <span>Wonder Demo</span>
+        </button>
+        <button id="btn-watch-ai-match" type="button" class="wii-ok-btn watch-ai-start-btn" title="Watch a continuous AI vs AI match with real physics, boasts, drops &amp; referee voice (Key: P)">
+          <span class="hand-cursor-icon">🤖</span>
+          <span>Watch AI vs AI</span>
         </button>
         <button id="btn-start-match" type="button" class="wii-ok-btn">
           <span class="hand-cursor-icon">🎾</span>
-          <span>Play Match Now</span>
+          <span id="btn-start-match-label">Play Match Now</span>
         </button>
       </div>
     </div>

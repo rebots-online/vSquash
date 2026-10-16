@@ -315,12 +315,13 @@ export class ArgonTennisEngine {
       gamesToWin: 2
     });
     this.shotController = new ShotController();
-    this.opponentAI = new OpponentAI();
+    this.opponentAI = new OpponentAI('opponent');
+    this.playerAI = new OpponentAI('player');
 
     // 4. Match & Score State
     const initialDiff = this.isMultiplayer
       ? '1v1'
-      : ['casual', 'pro', '1v1'].includes(this.urlMode)
+      : ['casual', 'pro', 'ai_vs_ai', '1v1'].includes(this.urlMode)
         ? this.urlMode
         : 'casual';
     this.matchConfig = {
@@ -336,7 +337,9 @@ export class ArgonTennisEngine {
     this.phaseTimer = 0;
     this.selectedShotType = 'TOPSPIN';
     this.p2SelectedShotType = 'TOPSPIN';
-    this.autoPlayMode = this.urlAutoPlay;
+    this.spectatorMatchMode =
+      initialDiff === 'ai_vs_ai' || this.urlMode === 'spectate' || this.urlState === 'spectate';
+    this.autoPlayMode = this.urlAutoPlay || this.spectatorMatchMode;
     this.userHasInteracted = false;
     this.persistentStateLock = false;
     this.pendingUserSwing = null;
@@ -462,9 +465,17 @@ export class ArgonTennisEngine {
     this.matchConfig.difficulty = d;
     if (d === '1v1') {
       this.isMultiplayer = true;
+      this.spectatorMatchMode = false;
       this.matchConfig.gamesToWin = 1;
       this.player.maxSpeed = 7.2;
       this.opponent.maxSpeed = 7.2;
+    } else if (d === 'ai_vs_ai') {
+      this.isMultiplayer = false;
+      this.player.maxSpeed = 7.1;
+      this.opponent.maxSpeed = 7.1;
+      this.tuningStore.setParam('movementAndAI', 'aiAnticipationStrength', 0.84);
+      this.tuningStore.setParam('movementAndAI', 'aiReactionDelayMs', 145);
+      this.tuningStore.setParam('movementAndAI', 'aiAggression', 0.74);
     } else if (d === 'pro') {
       this.isMultiplayer = Boolean(this.urlRoom && this.urlRoom !== 'DEFAULT');
       this.player.maxSpeed = 7.0;
@@ -667,9 +678,15 @@ export class ArgonTennisEngine {
           this.introDirector.active = false;
           this.hud.hideIntroOverlay();
         }
+        if (difficulty === 'ai_vs_ai') {
+          this.startSpectatorAIMatch({ showStartBanner: true });
+          return;
+        }
+        this.spectatorMatchMode = false;
         this.autoPlayMode = false;
         this.userHasInteracted = true;
         this.persistentStateLock = false;
+        this._syncSpectatorModeUI();
         if (inputMode === 'webcam' && this.motionController) {
           this.motionController.enableWebcam();
         }
@@ -818,6 +835,8 @@ export class ArgonTennisEngine {
         this.audioEngine?.nextJukeboxTrack();
       } else if (e.code === 'KeyV') {
         this.toggleRefereeVoice();
+      } else if (e.code === 'KeyP') {
+        this.toggleSpectatorAIMode();
       } else if (e.code === 'KeyM') {
         this.hud.callbacks.onToggleAudio();
       } else if (e.code === 'Escape') {
@@ -993,8 +1012,111 @@ export class ArgonTennisEngine {
       await this.hud.callbacks.onToggleWebcam?.();
     });
 
+    const spectatorHudBtn = document.getElementById('btn-spectator-toggle');
+    spectatorHudBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.toggleSpectatorAIMode();
+    });
+
+    const watchAiSetupBtn = document.getElementById('btn-watch-ai-match');
+    watchAiSetupBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.startSpectatorAIMatch({ showStartBanner: true });
+    });
+
     this._syncRefereeVoiceUI();
     this._syncJukeboxModalUI();
+    this._syncSpectatorModeUI();
+  }
+
+  startSpectatorAIMatch({ showStartBanner = true } = {}) {
+    if (this.introDirector) {
+      this.introDirector.active = false;
+      this.hud.hideIntroOverlay();
+    }
+    this.hud.hideTitleModal();
+    this.hud.hideVictoryModal();
+    this.hud.setReplayMode(false);
+
+    this.spectatorMatchMode = true;
+    this.autoPlayMode = true;
+    this.userHasInteracted = true;
+    this.persistentStateLock = false;
+    this._applyDifficultyTuning('ai_vs_ai');
+
+    this.rulesEngine.resetMatch({
+      gamesToWin: this.matchConfig.gamesToWin,
+      scoringMode: this.matchConfig.scoringSystem
+    });
+    this.score = this.rulesEngine.score;
+    this.playerAI.resetMemory();
+    this.opponentAI.resetMemory();
+    this._syncScoreboardHUD();
+    this._syncSpectatorModeUI();
+
+    if (this.audioEngine) {
+      this.audioEngine.playMusicForState('rally');
+      this.audioEngine.playWelcomeIntro({ force: true, withLoveAll: true });
+    }
+
+    this._setupPointServe({
+      showBanner: showStartBanner,
+      bannerText: 'AI vs AI Exhibition',
+      bannerStyle: 'style-start',
+      persistentBanner: false
+    });
+    this.hud.showTimingPopup({
+      grade: '🤖 AI vs AI CONTINUOUS MATCH',
+      detail: 'BOTH PLAYERS AI-CONTROLLED • PRESS P OR CLICK TOP BAR TO PLAY',
+      durationMs: 2800
+    });
+  }
+
+  toggleSpectatorAIMode(forceState = undefined) {
+    const next = typeof forceState === 'boolean' ? forceState : !this.spectatorMatchMode;
+    if (next) {
+      if (this.phase === 'TITLE' || this.phase === 'MATCH_OVER' || this.phase === 'WONDER_INTRO') {
+        this.startSpectatorAIMatch({ showStartBanner: true });
+        return true;
+      }
+      this.spectatorMatchMode = true;
+      this.autoPlayMode = true;
+      this.userHasInteracted = true;
+      this.persistentStateLock = false;
+      this._applyDifficultyTuning('ai_vs_ai');
+      this._syncSpectatorModeUI();
+      this.hud.showTimingPopup({
+        grade: '🤖 AI vs AI SPECTATOR: ON',
+        detail: 'BOTH PLAYERS CONTROLLED BY PRO AI • PRESS P TO TAKE OVER',
+        durationMs: 2200
+      });
+    } else {
+      this.spectatorMatchMode = false;
+      this.autoPlayMode = false;
+      this.userHasInteracted = true;
+      this._applyDifficultyTuning(
+        this.matchConfig.difficulty === 'ai_vs_ai' ? 'pro' : this.matchConfig.difficulty
+      );
+      this._syncSpectatorModeUI();
+      this.hud.showTimingPopup({
+        grade: '🎾 PLAYER 1 CONTROL ACTIVE',
+        detail: 'YOU ARE NOW CONTROLLING PLAYER 1 • PRESS P TO WATCH AI vs AI',
+        durationMs: 2200
+      });
+    }
+    return next;
+  }
+
+  _syncSpectatorModeUI() {
+    const active = Boolean(this.spectatorMatchMode);
+    const btn = document.getElementById('btn-spectator-toggle');
+    const lbl = document.getElementById('spectator-label');
+    if (btn) btn.classList.toggle('active', active);
+    if (lbl) {
+      lbl.textContent = active
+        ? '🤖 AI vs AI LIVE (Click / P to Play)'
+        : '🤖 WATCH AI vs AI (P)';
+    }
   }
 
   toggleRefereeVoice() {
@@ -1354,6 +1476,12 @@ export class ArgonTennisEngine {
       return;
     }
 
+    if (this.spectatorMatchMode) {
+      this.startSpectatorAIMatch({ showStartBanner: true });
+      this._snapCameraImmediate();
+      return;
+    }
+
     if (!this.urlAutoPlay) {
       this.rulesEngine.resetMatch({
         gamesToWin: this.matchConfig.gamesToWin,
@@ -1594,8 +1722,10 @@ export class ArgonTennisEngine {
       scoringMode: this.matchConfig.scoringSystem
     });
     this.score = this.rulesEngine.score;
+    this.playerAI.resetMemory();
     this.opponentAI.resetMemory();
     this._syncScoreboardHUD();
+    this._syncSpectatorModeUI();
     this.hud.setReplayMode(false);
     if (this.audioEngine) {
       this.audioEngine.playMusicForState('start');
@@ -1772,6 +1902,7 @@ export class ArgonTennisEngine {
   }
 
   _handleUserTossInput() {
+    if (this.spectatorMatchMode) return false;
     this.userHasInteracted = true;
     if (this.phase === 'TITLE') {
       this.hud.hideTitleModal();
@@ -1790,6 +1921,9 @@ export class ArgonTennisEngine {
   }
 
   _handleUserSwingInput(evt = {}) {
+    if (this.spectatorMatchMode) {
+      return;
+    }
     this.userHasInteracted = true;
     if (this.phase === 'TITLE') {
       this.hud.hideTitleModal();
@@ -2115,19 +2249,20 @@ export class ArgonTennisEngine {
       );
     }
 
-    if (!this.autoPlayMode) {
+    if (!this.autoPlayMode || this.spectatorMatchMode) {
       const screenPos = this._projectToScreen(this.player.pos.clone().add(new THREE.Vector3(0, 2.15, 0)));
       const detail = isDrop
         ? `OPEN CUT ${Math.round(shot.cutAngleDeg)}° • ${shot.speedKmh} KM/H`
         : `${shot.speedKmh} KM/H • PRONATION ${Math.round(shot.forearmPronationDegPerSec)}°/S`;
+      const prefix = this.spectatorMatchMode ? 'P1 AI • ' : '';
       this.hud.showTimingPopup({
-        grade: `${shot.label} (${shot.timingGrade})`,
+        grade: `${prefix}${shot.label} (${shot.timingGrade})`,
         detail,
         screenPos
       });
       this.hud.updateTimingGauge({
-        cursorNormalized: isDrop ? 0.24 : shot.shotId.includes('BOAST') ? 0.78 : 0.5,
-        modeTitle: shot.label,
+        cursorNormalized: isDrop ? 0.24 : String(shot.shotId || '').includes('BOAST') ? 0.78 : 0.5,
+        modeTitle: `${prefix}${shot.label}`,
         speedText: `${shot.speedKmh} KM/H`
       });
     }
@@ -2200,6 +2335,7 @@ export class ArgonTennisEngine {
       isDisguised: shot.isDisguised
     });
 
+    this.playerAI?.recordPlayerShot(shot, this.ball, this.tuningStore.params);
     this.currentPredictedTrajectory = BallPhysics.simulateTrajectory(
       this.ball,
       this.tuningStore.params,
@@ -2229,6 +2365,20 @@ export class ArgonTennisEngine {
 
     if (this.audioEngine) {
       this.audioEngine.playRacketHit(isDrop ? 'slice' : 'topspin', 'good');
+    }
+
+    if (this.spectatorMatchMode) {
+      const screenPos = this._projectToScreen(this.opponent.pos.clone().add(new THREE.Vector3(0, 2.15, 0)));
+      this.hud.showTimingPopup({
+        grade: `P2 AI • ${shot.label}`,
+        detail: `${shot.speedKmh} KM/H`,
+        screenPos
+      });
+      this.hud.updateTimingGauge({
+        cursorNormalized: isDrop ? 0.24 : String(shot.shotId || '').includes('BOAST') ? 0.78 : 0.5,
+        modeTitle: `P2 AI • ${shot.label}`,
+        speedText: `${shot.speedKmh} KM/H`
+      });
     }
 
     return true;
@@ -2360,10 +2510,13 @@ export class ArgonTennisEngine {
       return;
     }
 
+    const aiControlsPlayer =
+      this.spectatorMatchMode || (this.autoPlayMode && !this.userHasInteracted);
+
     if (this.phase === 'SERVE_STANCE' && !this.persistentStateLock) {
-      if (this.score.server === 'opponent' && !this.isMultiplayer && this.phaseTimer > 1.1) {
+      if (this.score.server === 'opponent' && !this.isMultiplayer && this.phaseTimer > 0.95) {
         this._startServeToss(this.opponent);
-      } else if (this.autoPlayMode && this.score.server === 'player' && this.phaseTimer > 1.2) {
+      } else if (aiControlsPlayer && this.score.server === 'player' && this.phaseTimer > 0.95) {
         this._startServeToss(this.player);
       }
     }
@@ -2380,7 +2533,8 @@ export class ArgonTennisEngine {
       }
 
       if (
-        ((this.score.server === 'opponent' && !this.isMultiplayer) || this.autoPlayMode) &&
+        ((this.score.server === 'opponent' && !this.isMultiplayer) ||
+          (aiControlsPlayer && this.score.server === 'player')) &&
         this.ball.vel.y <= 0.4 &&
         this.ball.pos.y >= 1.32
       ) {
@@ -2399,8 +2553,27 @@ export class ArgonTennisEngine {
     }
 
     if (this.phase === 'POINT_OVER') {
-      if (this.phaseTimer > 2.0) {
+      if (this.phaseTimer > 1.85) {
         this._setupPointServe({ showBanner: true });
+      }
+      return;
+    }
+
+    if (this.phase === 'MATCH_OVER') {
+      if ((this.spectatorMatchMode || this.autoPlayMode) && this.phaseTimer > 3.1) {
+        this.rulesEngine.resetMatch({
+          gamesToWin: this.matchConfig.gamesToWin,
+          scoringMode: this.matchConfig.scoringSystem
+        });
+        this.score = this.rulesEngine.score;
+        this.playerAI.resetMemory();
+        this.opponentAI.resetMemory();
+        this._syncScoreboardHUD();
+        this._setupPointServe({
+          showBanner: true,
+          bannerText: 'Next AI vs AI Match',
+          bannerStyle: 'style-start'
+        });
       }
       return;
     }
@@ -2423,95 +2596,94 @@ export class ArgonTennisEngine {
 
       this.ballTrail.pushPoint(this.ball.pos);
 
-      // Update Preparation hold state
-      const isHolding = Boolean(
-        this.motionController &&
-          (this.motionController.prepHoldStartMs > 0 || this.motionController.pointerDrag)
-      );
-      if (isHolding) {
-        const st = this.shotController.updatePreparation('player', dt, this.tuningStore.params);
-        this.player.manualPrepCharge = st.chargeNormalized;
-        this.opponentAI.observePlayerPreparation(
-          this.opponent,
+      if (aiControlsPlayer) {
+        // Full Tactical AI control for Player 1 (both in Watch AI vs AI Spectator Mode and Title Menu Idling)
+        this.playerAI.updateAI({
+          opponent: this.player,
+          player: this.opponent,
+          ball: this.ball,
+          dt,
+          params: this.tuningStore.params,
+          predictedTrajectory: this.currentPredictedTrajectory,
+          onExecuteAIShot: (choice) => {
+            this._attemptPlayerRallyStrike(choice, true);
+          }
+        });
+        PlayerMovement.stepActorLocomotion(
           this.player,
-          st,
-          this.tuningStore.params
+          this.opponent,
+          dt,
+          this.tuningStore.params,
+          this.ball.lastHitter === 'player'
         );
       } else {
-        this.player.manualPrepCharge = 0;
-      }
-
-      // Compute intercept point for player
-      const interceptSample =
-        this.currentPredictedTrajectory?.firstFloorBouncePos ||
-        this.ball.pos;
-
-      // Webcam body pose lunge offset
-      const poseLungeOffset =
-        this.motionController?.webcamActive && this.motionController?.smoothedCentroid
-          ? {
-              active: Math.abs(this.motionController.smoothedCentroid.x - 0.5) > 0.14,
-              x: (this.motionController.smoothedCentroid.x - 0.5) * 1.6,
-              z: (this.motionController.smoothedCentroid.y - 0.5) * 1.2
-            }
-          : null;
-
-      PlayerMovement.updatePlayerRallyTarget({
-        player: this.player,
-        opponent: this.opponent,
-        ball: this.ball,
-        keysDown: this.motionController?.keysDown,
-        poseLungeOffset,
-        params: this.tuningStore.params,
-        interceptPoint: interceptSample
-      });
-
-      const playerRecoveringToT = this.ball.lastHitter === 'player';
-      PlayerMovement.stepActorLocomotion(
-        this.player,
-        this.opponent,
-        dt,
-        this.tuningStore.params,
-        playerRecoveringToT
-      );
-
-      // Check queued player swing
-      if (this.pendingUserSwing && this.ball.lastHitter === 'opponent') {
-        if (this.elapsedTime > this.pendingUserSwing.expiresAt) {
-          this.pendingUserSwing = null;
-        } else if (this.ball.hitFrontWallThisShot) {
-          const dist = Math.hypot(
-            this.ball.pos.x - this.player.pos.x,
-            this.ball.pos.z - this.player.pos.z
-          );
-          if (dist <= 2.75 && this.ball.pos.y <= 2.35) {
-            const evt = this.pendingUserSwing.evt;
-            this.pendingUserSwing = null;
-            this._attemptPlayerRallyStrike(evt, false);
-            return;
-          }
-        }
-      }
-
-      // AutoPlay rally strike for background title/showcase
-      if (
-        this.autoPlayMode &&
-        !this.userHasInteracted &&
-        this.ball.lastHitter === 'opponent' &&
-        this.ball.hitFrontWallThisShot
-      ) {
-        const dist = Math.hypot(
-          this.ball.pos.x - this.player.pos.x,
-          this.ball.pos.z - this.player.pos.z
+        // Human control for Player 1
+        const isHolding = Boolean(
+          this.motionController &&
+            (this.motionController.prepHoldStartMs > 0 || this.motionController.pointerDrag)
         );
-        if (dist <= 2.4 && this.ball.pos.y <= 1.85) {
-          const autoShots = ['topspin', 'topspin', 'boast', 'drop'];
-          const pick = autoShots[this.ball.rallyStrokeCount % autoShots.length];
-          this._attemptPlayerRallyStrike(
-            { shotType: pick, cutModifier: pick === 'drop', speed: 1.18 },
-            true
+        if (isHolding) {
+          const st = this.shotController.updatePreparation('player', dt, this.tuningStore.params);
+          this.player.manualPrepCharge = st.chargeNormalized;
+          this.opponentAI.observePlayerPreparation(
+            this.opponent,
+            this.player,
+            st,
+            this.tuningStore.params
           );
-          return;
+        } else {
+          this.player.manualPrepCharge = 0;
+        }
+
+        const interceptSample =
+          this.currentPredictedTrajectory?.firstFloorBouncePos ||
+          this.ball.pos;
+
+        const poseLungeOffset =
+          this.motionController?.webcamActive && this.motionController?.smoothedCentroid
+            ? {
+                active: Math.abs(this.motionController.smoothedCentroid.x - 0.5) > 0.14,
+                x: (this.motionController.smoothedCentroid.x - 0.5) * 1.6,
+                z: (this.motionController.smoothedCentroid.y - 0.5) * 1.2
+              }
+            : null;
+
+        PlayerMovement.updatePlayerRallyTarget({
+          player: this.player,
+          opponent: this.opponent,
+          ball: this.ball,
+          keysDown: this.motionController?.keysDown,
+          poseLungeOffset,
+          params: this.tuningStore.params,
+          interceptPoint: interceptSample,
+          predictedTrajectory: this.currentPredictedTrajectory
+        });
+
+        const playerRecoveringToT = this.ball.lastHitter === 'player';
+        PlayerMovement.stepActorLocomotion(
+          this.player,
+          this.opponent,
+          dt,
+          this.tuningStore.params,
+          playerRecoveringToT
+        );
+
+        // Check queued player swing
+        if (this.pendingUserSwing && this.ball.lastHitter === 'opponent') {
+          if (this.elapsedTime > this.pendingUserSwing.expiresAt) {
+            this.pendingUserSwing = null;
+          } else if (this.ball.hitFrontWallThisShot) {
+            const dist = Math.hypot(
+              this.ball.pos.x - this.player.pos.x,
+              this.ball.pos.z - this.player.pos.z
+            );
+            if (dist <= 2.75 && this.ball.pos.y <= 2.35) {
+              const evt = this.pendingUserSwing.evt;
+              this.pendingUserSwing = null;
+              this._attemptPlayerRallyStrike(evt, false);
+              return;
+            }
+          }
         }
       }
 
@@ -2594,21 +2766,38 @@ export class ArgonTennisEngine {
     if (outcome.matchWonBy) {
       const pWon = outcome.matchWonBy === 'player';
       this.phase = 'MATCH_OVER';
-      const banner = this.isMultiplayer ? (pWon ? 'P1 WINS!' : 'P2 WINS!') : pWon ? 'YOU WIN!' : 'MATCH OVER';
+      this.phaseTimer = 0;
+      const banner = this.spectatorMatchMode
+        ? pWon
+          ? 'PRO AI 1 WINS!'
+          : 'PRO AI 2 WINS!'
+        : this.isMultiplayer
+          ? pWon
+            ? 'P1 WINS!'
+            : 'P2 WINS!'
+          : pWon
+            ? 'YOU WIN!'
+            : 'MATCH OVER';
       const sub = `${refereeCallout} • Final Games: ${this.score.playerGames} - ${this.score.opponentGames}`;
       this._recordBannerBroadcast(banner, 'style-gold', sub);
-      this.hud.showCenterBanner(banner, { style: 'style-gold', subText: sub, durationMs: 2600 });
+      this.hud.showCenterBanner(banner, { style: 'style-gold', subText: sub, durationMs: 2800 });
       if (this.audioEngine) {
-        this.audioEngine.playMusicForState('victory');
+        if (!this.spectatorMatchMode) {
+          this.audioEngine.playMusicForState('victory');
+        }
         this.audioEngine.announceScore(refereeCallout);
       }
-      setTimeout(() => {
-        this.hud.showVictoryModal({
-          playerWon: this.playerRole === 'p2' ? !pWon : pWon,
-          playerGames: this.score.playerGames,
-          opponentGames: this.score.opponentGames
-        });
-      }, 1800);
+      if (!this.spectatorMatchMode && !this.autoPlayMode) {
+        setTimeout(() => {
+          if (!this.spectatorMatchMode && !this.autoPlayMode) {
+            this.hud.showVictoryModal({
+              playerWon: this.playerRole === 'p2' ? !pWon : pWon,
+              playerGames: this.score.playerGames,
+              opponentGames: this.score.opponentGames
+            });
+          }
+        }, 1800);
+      }
       return;
     }
 

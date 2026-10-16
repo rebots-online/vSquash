@@ -11,10 +11,12 @@
 
 import * as THREE from 'three';
 import { COURT_SPECS } from './CourtGeometry.js';
+import { BallPhysics } from './BallPhysics.js';
 
 export const SQUASH_SHOT_TYPES = Object.freeze({
   STRAIGHT_DRIVE: 'STRAIGHT_DRIVE',
   CROSS_DRIVE: 'CROSS_DRIVE',
+  OFF_BACK_WALL_DRIVE: 'OFF_BACK_WALL_DRIVE',
   VOLLEY_KILL: 'VOLLEY_KILL',
   DISGUISED_DROP: 'DISGUISED_DROP',
   COUNTER_DROP: 'COUNTER_DROP',
@@ -188,42 +190,39 @@ export class ShotController {
 
     const dzToFront = COURT_SPECS.FRONT_WALL_Z - contactPos.z; // negative value
 
-    if (isBoastRequest && isDeepBackCorner && rawRequested === 'back_wall_boast') {
-      // --- BACK-WALL RECOVERY BOAST (Struck into Back Glass Wall +Z) ---
+    const isTrappedAtBack =
+      rawRequested === 'back_wall_boast' ||
+      (contactPos.z >= 3.10 && !isOffBackWall && Math.abs(contactPos.x) > 1.15) ||
+      contactPos.z >= 3.48;
+
+    if (isBoastRequest && isTrappedAtBack) {
+      // --- BACK-WALL RECOVERY BOAST (Trapped at Back of Court -> Back Glass + Side Wall + Front Wall) ---
       shotId = SQUASH_SHOT_TYPES.BACK_WALL_BOAST;
       label = 'BACK-WALL BOAST';
       cutAngleDeg = 28;
       forearmPronationDegPerSec = 390;
-      const dzToBack = COURT_SPECS.BACK_WALL_Z - contactPos.z;
-      const flightBack = 0.14;
+      const dzToBack = Math.max(0.45, COURT_SPECS.BACK_WALL_Z - contactPos.z);
+      // Launch into Back Glass Wall + Near Side Wall with sufficient pace & loft to reach Front Wall above Tin
       vel.set(
-        -playerSideSign * 3.2,
-        4.85,
-        Math.max(13.5, dzToBack / flightBack)
+        playerSideSign * 6.8,
+        5.15 + Math.max(0, (0.85 - contactPos.y) * 1.4),
+        Math.max(33.5, 29.0 + dzToBack * 2.2)
       );
       spin.set(-14 * spinScale, playerSideSign * 8 * spinScale, 0);
     } else if (isBoastRequest) {
-      // --- TWO-WALL ATTACKING / TRICKLE BOAST ---
+      // --- ATTACKING SIDEWALL -> FRONTWALL -> NICK BOAST ---
       shotId = SQUASH_SHOT_TYPES.TWO_WALL_BOAST;
       label = isDisguised
-        ? 'DISGUISED BOAST'
+        ? 'DISGUISED NICK BOAST'
         : isOffBackWall
-        ? 'OFF-BACK-WALL BOAST'
-        : 'TWO-WALL BOAST';
+        ? 'OFF-BACK-WALL NICK BOAST'
+        : 'SIDE-FRONT NICK BOAST';
       cutAngleDeg = 24;
-      forearmPronationDegPerSec = 410;
-      const wallX = playerSideSign * (COURT_SPECS.HALF_WIDTH - 0.04);
-      const zMid = contactPos.z + dzToFront * 0.52;
-      const tWall = 0.22;
-      const dx = wallX - contactPos.x;
-      const dz = zMid - contactPos.z;
-      const dy = 1.05 - contactPos.y;
-      vel.set(
-        dx / tWall,
-        (dy + 0.5 * g * tWall * tWall) / tWall,
-        dz / tWall
-      );
-      spin.set(-12 * spinScale, playerSideSign * 14 * spinScale, 0);
+      forearmPronationDegPerSec = 430;
+
+      const boastSol = this._computeSideFrontNickBoastVector(contactPos, playerSideSign, params);
+      vel.copy(boastSol.vel);
+      spin.copy(boastSol.spin);
     } else if (isCutModifier) {
       // --- OPEN-FACED CUT DROP / DISGUISED HOLD-AND-DROP ---
       shotId = isDisguised ? SQUASH_SHOT_TYPES.DISGUISED_DROP : SQUASH_SHOT_TYPES.COUNTER_DROP;
@@ -376,6 +375,67 @@ export class ShotController {
       timingGrade,
       speedKmh
     };
+  }
+
+  /**
+   * Computes the exact 2-cushion attacking boast launch vector so the ball:
+   *   1. Strikes the near Side Wall (`X = ±3.20m`)
+   *   2. Angles across onto the Front Wall (`Z = -4.875m`, above the 0.48m Tin)
+   *   3. Lands directly into the opposite Side-Wall / Floor Nick junction (`X = ∓3.20m, Y = 0`).
+   */
+  _computeSideFrontNickBoastVector(contactPos, sideSign, params = {}) {
+    const bp = params.ballPhysics || {};
+    const tempFactor = Math.max(0.76, Math.min(1.18, 1.0 + ((bp.ballTemperatureC ?? 36) - 36) * 0.011));
+    const corSide = Math.min(0.86, (bp.sideWallRestitution ?? 0.66) * tempFactor);
+    const friction = Number(bp.surfaceFriction ?? 0.80);
+    const spinScale = Number(params.shotMechanics?.spinMagnitudeScale ?? 1.0);
+    const spin = new THREE.Vector3(-12 * spinScale, sideSign * 14 * spinScale, 0);
+
+    const radius = COURT_SPECS.BALL_RADIUS * 1.65;
+    const sideLimitX = COURT_SPECS.HALF_WIDTH - radius; // 3.167m
+    const frontLimitZ = COURT_SPECS.FRONT_WALL_Z + radius; // -4.842m
+
+    const dx1 = Math.max(0.35, sideLimitX - sideSign * contactPos.x);
+    const dzFront = Math.max(1.8, contactPos.z - frontLimitZ);
+    const dxAcross = 2 * sideLimitX; // 6.334m across court from near side wall to opposite nick
+
+    const tFront = THREE.MathUtils.clamp(dzFront / 19.5, 0.25, 0.42);
+    const tAfterFront = 0.17;
+    const K = dxAcross / (dx1 * corSide * 0.96);
+    const t1 = (tFront + friction * tAfterFront) / (1 + K);
+
+    const baseVx = sideSign * (dx1 / t1) * 1.005;
+    const baseVz = -(dzFront / (t1 + friction * (tFront - t1))) * 1.02;
+    const baseVy = (0.72 - contactPos.y) / tFront + 0.5 * 9.81 * (tFront + tAfterFront) * 0.56;
+
+    let bestVel = new THREE.Vector3(baseVx, baseVy, baseVz);
+    let bestScore = 1e9;
+
+    for (const dvy of [-0.55, -0.35, -0.18, 0, 0.18, 0.36, 0.55, 0.75]) {
+      const candVel = new THREE.Vector3(baseVx, baseVy + dvy, baseVz);
+      const sim = BallPhysics.simulateTrajectory(
+        { pos: contactPos, vel: candVel, spin },
+        params,
+        null,
+        { maxTimeSec: 0.75 }
+      );
+      const sideHit = sim.events.find((c) => c.surface.startsWith('side_wall'));
+      const frontHit = sim.events.find((c) => c.surface === 'front_wall');
+      const firstBounce = sim.events.find((c) => c.surface === 'nick' || c.surface === 'floor');
+      if (!sideHit || !frontHit || !firstBounce || frontHit.isTin || frontHit.isOut) continue;
+      if (sim.events.indexOf(sideHit) > sim.events.indexOf(frontHit)) continue;
+      const targetNickX = -sideSign * sideLimitX;
+      const xErr = Math.abs(firstBounce.pos.x - targetNickX);
+      const nickBonus = firstBounce.isNick ? -2.0 : 0;
+      const score = xErr + nickBonus;
+      if (score < bestScore) {
+        bestScore = score;
+        bestVel = candVel;
+      }
+      if (firstBounce.isNick) break;
+    }
+
+    return { vel: bestVel, spin };
   }
 }
 

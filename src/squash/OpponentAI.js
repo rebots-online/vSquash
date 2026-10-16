@@ -13,12 +13,13 @@ import { PlayerMovement } from './PlayerMovement.js';
 import { SQUASH_SHOT_TYPES } from './ShotController.js';
 
 export class OpponentAI {
-  constructor() {
+  constructor(role = 'opponent') {
+    this.role = role;
     this.resetMemory();
   }
 
   resetMemory() {
-    this.playerShotHistory = []; // Rolling window of player shot types & depths
+    this.playerShotHistory = []; // Rolling window of opponent shot types & depths
     this.anticipatedBiasZ = 0;   // Positive = leaning deep behind T; Negative = creeping forward
     this.anticipatedBiasX = 0;
     this.reactionTimerSec = 0;   // Split-step delay when caught wrong-footed or disguised
@@ -28,7 +29,7 @@ export class OpponentAI {
   }
 
   /**
-   * Records a shot struck by the player to update the AI's short-term pattern memory.
+   * Records a shot struck by the other player to update the AI's short-term pattern memory.
    */
   recordPlayerShot(shotResult, ballState, params = {}) {
     const ma = params.movementAndAI || {};
@@ -46,6 +47,7 @@ export class OpponentAI {
       shotResult.shotId === SQUASH_SHOT_TYPES.DISGUISED_DROP ||
       shotResult.shotId === SQUASH_SHOT_TYPES.COUNTER_DROP ||
       shotResult.shotId === SQUASH_SHOT_TYPES.TWO_WALL_BOAST ||
+      shotResult.shotId === SQUASH_SHOT_TYPES.BACK_WALL_BOAST ||
       shotResult.shotId === SQUASH_SHOT_TYPES.VOLLEY_KILL;
 
     // Check if the AI was lulled into expecting a deep drive and got hit with a disguised short shot!
@@ -56,7 +58,7 @@ export class OpponentAI {
       // Caught wrong-footed by disguise or drive rhythm!
       this.reactionTimerSec = baseDelaySec * (1.35 + antStrength * 0.45);
     } else {
-      this.reactionTimerSec = baseDelaySec * 0.65;
+      this.reactionTimerSec = baseDelaySec * 0.55;
     }
 
     this.playerShotHistory.push({
@@ -82,15 +84,16 @@ export class OpponentAI {
   }
 
   /**
-   * Reads the player's live preparation windup before contact.
-   * When the player coils into a full backswing, the AI shifts slightly deeper
+   * Reads the other player's live preparation windup before contact.
+   * When the hitter coils into a full backswing, the AI shifts slightly deeper
    * anticipating a hard drive—setting up the tactical payoff of a disguised drop.
    */
   observePlayerPreparation(opponentActor, playerActor, prepState, params = {}) {
     if (!prepState || !prepState.active) return;
+    const selfRole = opponentActor?.role || this.role || 'opponent';
     const antStrength = Number(params.movementAndAI?.aiAnticipationStrength ?? 0.68);
     if (prepState.chargeNormalized > 0.55) {
-      const tPos = PlayerMovement.getTRecoveryPosition(params, 'opponent');
+      const tPos = PlayerMovement.getTRecoveryPosition(params, selfRole);
       const driftZ = 0.35 * prepState.chargeNormalized * antStrength;
       opponentActor.targetPos.set(
         tPos.x - Math.sign(playerActor.pos.x || 1) * 0.25,
@@ -102,6 +105,7 @@ export class OpponentAI {
 
   /**
    * Updates AI target position and decides when/how to strike the ball.
+   * Works for either 'opponent' or 'player' actor (enabling AI vs AI spectator matches).
    */
   updateAI({
     opponent,
@@ -112,11 +116,12 @@ export class OpponentAI {
     predictedTrajectory,
     onExecuteAIShot
   }) {
-    if (!ball || !ball.inPlay) return;
+    if (!ball || !ball.inPlay || !opponent) return;
+    const selfRole = opponent.role || this.role || 'opponent';
 
-    // 1. If AI just hit the ball -> Recover toward the T (with pattern-memory bias)
-    if (ball.lastHitter === 'opponent') {
-      const tPos = PlayerMovement.getTRecoveryPosition(params, 'opponent');
+    // 1. If this AI actor just hit the ball -> Recover toward the T (with pattern-memory bias)
+    if (ball.lastHitter === selfRole) {
+      const tPos = PlayerMovement.getTRecoveryPosition(params, selfRole);
       opponent.targetPos.set(
         THREE.MathUtils.clamp(tPos.x + this.anticipatedBiasX, -1.8, 1.8),
         0,
@@ -125,7 +130,7 @@ export class OpponentAI {
       return;
     }
 
-    // 2. Player hit the ball -> AI is Receiver
+    // 2. Other player hit the ball -> This AI actor is Receiver
     if (this.reactionTimerSec > 0) {
       this.reactionTimerSec = Math.max(0, this.reactionTimerSec - dt);
       return;
@@ -156,7 +161,7 @@ export class OpponentAI {
     } else if (predictedTrajectory && predictedTrajectory.samples?.length > 0) {
       const viableSample =
         predictedTrajectory.samples.find(
-          (s) => s.pos.z > -3.2 && s.pos.y >= 0.32 && s.pos.y <= 1.25 && s.bounceCount >= 1
+          (s) => s.pos.z > -3.2 && s.pos.y >= 0.30 && s.pos.y <= 1.32 && s.bounceCount >= 1
         ) ||
         (predictedTrajectory.firstFloorBouncePos
           ? { pos: predictedTrajectory.firstFloorBouncePos }
@@ -194,12 +199,12 @@ export class OpponentAI {
     }
 
     const distXZ = Math.hypot(ball.pos.x - opponent.pos.x, ball.pos.z - opponent.pos.z);
-    const reachableY = ball.pos.y >= 0.14 && ball.pos.y <= 2.05;
+    const reachableY = ball.pos.y >= 0.12 && ball.pos.y <= 2.15;
     const isComingOffBackWall = Boolean(ball.hitBackWallThisShot && ball.vel.z < 0);
     const movingTowardBackOrSlow =
       isComingOffBackWall || ball.vel.z > -2.5 || ball.bounceCountOnFloor >= 1;
 
-    if (distXZ <= 1.56 && reachableY && movingTowardBackOrSlow) {
+    if (distXZ <= 1.72 && reachableY && movingTowardBackOrSlow) {
       const choice = this.chooseTacticalShot({ opponent, player, ball, params });
       if (typeof onExecuteAIShot === 'function') {
         onExecuteAIShot(choice);
@@ -208,13 +213,13 @@ export class OpponentAI {
   }
 
   /**
-   * Chooses a tactical squash shot based on court geometry and where the human player is standing.
+   * Chooses a tactical squash shot based on court geometry and where the other player is standing.
    */
   chooseTacticalShot({ opponent, player, ball, params = {} }) {
     const aggression = Number(params.movementAndAI?.aiAggression ?? 0.55);
-    const playerDistFromFront = player.pos.z - COURT_SPECS.FRONT_WALL_Z; // > 6.5m means player is trapped deep at the back!
+    const playerDistFromFront = player.pos.z - COURT_SPECS.FRONT_WALL_Z; // > 6.5m means other player is deep!
     const playerLateralGap = Math.abs(player.pos.x - opponent.pos.x);
-    const isFrontCourtBall = ball.pos.z < 0.25;
+    const isFrontCourtBall = ball.pos.z < 0.45;
     const isHighVolley = ball.bounceCountOnFloor === 0 && ball.pos.y > 1.15 && ball.pos.z < 0.9;
     const isComingOffBackWall = Boolean(ball.hitBackWallThisShot && ball.vel.z < 0);
 
@@ -229,7 +234,7 @@ export class OpponentAI {
       };
     }
 
-    // 2. If player left a loose high ball in mid-court and is deep -> Volley Kill or Disguised Drop
+    // 2. If other player left a loose high ball in mid-court and is deep -> Volley Kill
     if (isHighVolley && Math.random() < aggression * 0.85) {
       return {
         shotType: 'kill',
@@ -239,8 +244,16 @@ export class OpponentAI {
       };
     }
 
-    // 3. If player is stranded deep behind the T (Z > +1.85m) -> Play a disguised open-face drop!
-    if (playerDistFromFront > 6.65 && isFrontCourtBall && Math.random() < aggression) {
+    // 3. If other player is stranded deep behind the T (Z > +1.6m) -> Disguised Drop or Attacking 2-Wall Nick Boast!
+    if (playerDistFromFront > 6.45 && isFrontCourtBall && Math.random() < aggression) {
+      if (Math.abs(ball.pos.x) > 1.35 && Math.random() < 0.42) {
+        return {
+          shotType: 'boast',
+          speed: 1.16,
+          dirX: ball.pos.x >= 0 ? 0.75 : -0.75,
+          prepCharge: 0.72
+        };
+      }
       return {
         shotType: 'disguised_drop',
         cutModifier: true,
@@ -250,17 +263,19 @@ export class OpponentAI {
       };
     }
 
-    // 4. If AI is stretched wide in rear corners -> Two-Wall Boast or High Lob
-    if (ball.pos.z > 2.4 && Math.abs(ball.pos.x) > 2.1 && Math.random() < 0.42) {
+    // 4. If AI is stretched wide in mid/rear corners -> Sidewall-Frontwall-Nick Boast (or Back-Wall Boast if trapped deep) or High Lob
+    if (ball.pos.z > 1.75 && Math.abs(ball.pos.x) > 1.85 && Math.random() < 0.45) {
+      const isTrappedAtBack = opponent.pos.z >= 3.25 || ball.pos.z >= 3.15;
+      const useBoast = Math.random() < 0.65;
       return {
-        shotType: Math.random() < 0.55 ? 'boast' : 'lob',
-        speed: 1.12,
+        shotType: useBoast ? (isTrappedAtBack ? 'back_wall_boast' : 'boast') : 'lob',
+        speed: 1.15,
         dirX: ball.pos.x >= 0 ? 0.85 : -0.85,
-        prepCharge: 0.6
+        prepCharge: 0.65
       };
     }
 
-    // 5. Default "Physical Chess" foundation: Tight Straight Drive (or Cross-Court if player is hugging same wall)
+    // 5. Default "Physical Chess" foundation: Tight Straight Drive (or Cross-Court if other player is hugging same wall)
     const playCross = playerLateralGap < 0.85 && Math.random() < 0.42;
     return {
       shotType: playCross ? 'cross' : 'topspin',

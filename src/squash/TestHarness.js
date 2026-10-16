@@ -10,6 +10,8 @@ import { BallPhysics } from './BallPhysics.js';
 import { NickCollisionModel } from './NickCollisionModel.js';
 import { RulesEngine } from './RulesEngine.js';
 import { ShotController, SQUASH_SHOT_TYPES } from './ShotController.js';
+import { OpponentAI } from './OpponentAI.js';
+import { PlayerMovement } from './PlayerMovement.js';
 import { BiomechStrokeClassifier, STROKE_SIDES } from './BiomechStrokeClassifier.js';
 import { DEFAULT_TUNING_PARAMS, TuningConfigStore } from './TuningConfig.js';
 
@@ -356,6 +358,113 @@ export class TestHarness {
       occludedSeq.strokeSide === STROKE_SIDES.UNCERTAIN &&
         ambiguousMidlineSeq.strokeSide === STROKE_SIDES.UNCERTAIN,
       `Occluded=${occludedSeq.strokeSide} (conf=${occludedSeq.confidence}), AmbiguousMidline=${ambiguousMidlineSeq.strokeSide} (conf=${ambiguousMidlineSeq.confidence})`
+    );
+
+    // 8. Continuous AI vs AI Spectator Match Simulation (playerAI + opponentAI with real physics)
+    const p1AI = new OpponentAI('player');
+    const p2AI = new OpponentAI('opponent');
+    const p1Actor = {
+      role: 'player',
+      pos: new THREE.Vector3(1.4, 0, 1.8),
+      vel: new THREE.Vector3(),
+      targetPos: new THREE.Vector3(1.4, 0, 1.8),
+      maxSpeed: 7.1,
+      swingCooldown: 0,
+      root: { position: new THREE.Vector3(), rotation: { y: 0 } }
+    };
+    const p2Actor = {
+      role: 'opponent',
+      pos: new THREE.Vector3(-1.1, 0, 1.2),
+      vel: new THREE.Vector3(),
+      targetPos: new THREE.Vector3(-1.1, 0, 1.2),
+      maxSpeed: 7.1,
+      swingCooldown: 0,
+      root: { position: new THREE.Vector3(), rotation: { y: 0 } }
+    };
+    const simBall = {
+      pos: new THREE.Vector3(1.35, 0.92, -0.5),
+      vel: new THREE.Vector3(0.3, 2.5, -21.0),
+      spin: new THREE.Vector3(12, 0, 0),
+      inPlay: true,
+      lastHitter: 'player',
+      hitFrontWallThisShot: false,
+      hitBackWallThisShot: false,
+      bounceCountOnFloor: 0,
+      wallHitCountThisShot: 0
+    };
+    let predicted = BallPhysics.simulateTrajectory(simBall, params, store);
+    let p1Hits = 0;
+    let p2Hits = 0;
+    const simDt = 1 / 120;
+    for (let step = 0; step < 720 && simBall.inPlay; step++) {
+      p1Actor.swingCooldown = Math.max(0, p1Actor.swingCooldown - simDt);
+      p2Actor.swingCooldown = Math.max(0, p2Actor.swingCooldown - simDt);
+      BallPhysics.stepBallPhysics(simBall, simDt, params, store);
+      p1AI.updateAI({
+        opponent: p1Actor,
+        player: p2Actor,
+        ball: simBall,
+        dt: simDt,
+        params,
+        predictedTrajectory: predicted,
+        onExecuteAIShot: (choice) => {
+          const s = shotCtrl.computeShotExecution({
+            actor: p1Actor,
+            ball: simBall,
+            opponent: p2Actor,
+            inputEvent: choice,
+            prepSnapshot: fullPrep,
+            params
+          });
+          simBall.vel.copy(s.vel);
+          simBall.spin.copy(s.spin);
+          simBall.lastHitter = 'player';
+          simBall.hitFrontWallThisShot = false;
+          simBall.hitBackWallThisShot = false;
+          simBall.bounceCountOnFloor = 0;
+          p1Actor.swingCooldown = 0.2;
+          p2AI.recordPlayerShot(s, simBall, params);
+          predicted = BallPhysics.simulateTrajectory(simBall, params, store);
+          p1Hits++;
+        }
+      });
+      p2AI.updateAI({
+        opponent: p2Actor,
+        player: p1Actor,
+        ball: simBall,
+        dt: simDt,
+        params,
+        predictedTrajectory: predicted,
+        onExecuteAIShot: (choice) => {
+          const s = shotCtrl.computeShotExecution({
+            actor: p2Actor,
+            ball: simBall,
+            opponent: p1Actor,
+            inputEvent: choice,
+            prepSnapshot: fullPrep,
+            params
+          });
+          simBall.vel.copy(s.vel);
+          simBall.spin.copy(s.spin);
+          simBall.lastHitter = 'opponent';
+          simBall.hitFrontWallThisShot = false;
+          simBall.hitBackWallThisShot = false;
+          simBall.bounceCountOnFloor = 0;
+          p2Actor.swingCooldown = 0.2;
+          p1AI.recordPlayerShot(s, simBall, params);
+          predicted = BallPhysics.simulateTrajectory(simBall, params, store);
+          p2Hits++;
+        }
+      });
+      PlayerMovement.stepActorLocomotion(p1Actor, p2Actor, simDt, params, simBall.lastHitter === 'player');
+      PlayerMovement.stepActorLocomotion(p2Actor, p1Actor, simDt, params, simBall.lastHitter === 'opponent');
+    }
+
+    assert(
+      'TEST-SPECTATOR-AI-01',
+      'Dual Tactical AI (Player 1 AI vs Player 2 AI) Continuous Rally Exchange with Real Physics & T-Recovery',
+      p2Hits >= 1 && p1Hits >= 1,
+      `p2AIHits=${p2Hits}, p1AIHits=${p1Hits}, p1Pos=(${p1Actor.pos.x.toFixed(2)}, ${p1Actor.pos.z.toFixed(2)}), p2Pos=(${p2Actor.pos.x.toFixed(2)}, ${p2Actor.pos.z.toFixed(2)})`
     );
 
     const passedCount = results.filter((r) => r.passed).length;

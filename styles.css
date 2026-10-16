@@ -118,4 +118,9 @@ kbd{display:inline-block;padding:1px 6px;border-radius:5px;background:#1e293b;bo
 .jukebox-test-calls-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .jukebox-call-btn{padding:6px 8px;border-radius:8px;background:rgba(30,45,68,.9);border:1px solid rgba(123,224,255,.4);color:#e0f2fe;font-family:var(--wii-font);font-size:10.5px;font-weight:800;cursor:pointer;text-align:left;transition:all .12s ease}
 .jukebox-call-btn:hover{border-color:#ffea28;background:rgba(37,168,245,.28);color:#fff}
-
+.spectator-pill{border-color:rgba(123,224,255,.55);background:linear-gradient(180deg,rgba(20,40,68,.92),rgba(10,22,40,.95));color:#e0f2fe}
+.spectator-pill:hover{border-color:#ffea28;transform:translateY(-1px)}
+.spectator-pill.active{background:linear-gradient(180deg,#0284c7,#0369a1);border-color:#ffea28;color:#fff;box-shadow:0 0 14px rgba(56,189,248,.5)}
+.spectator-pill.active .tactical-dot{background:#ffea28;box-shadow:0 0 8px #ffea28}
+.watch-ai-start-btn{background:linear-gradient(180deg,#0ea5e9 0%,#0369a1 100%)!important;border-color:#7dd3fc!important;color:#fff!important}
+.watch-ai-start-btn:hover{filter:brightness(1.08);border-color:#ffea28!important}
